@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>KNN Model</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding: 18px; }
+  #controls { margin-bottom: 10px; display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  canvas { border: 1px solid #333; background: #fafafa; display:block; }
+  .legend { display:flex; gap:8px; align-items:center; }
+  .dot { width:12px; height:12px; border-radius:50%; display:inline-block; margin-right:6px; }
+  #info { margin-top:10px; white-space:pre-wrap; font-family:monospace; }
+  button, input { padding:6px 8px; }
+</style>
+</head>
+<body>
+<h2>K-Nearest Neighbors - ML Model</h2>
+
+<div id="controls">
+  <label>k: <input id="kInput" type="number" min="1" max="15" value="3" style="width:64px"></label>
+  <button id="toggleClass">Current class: A</button>
+  <button id="addRandom">Add 8 random points</button>
+  <button id="clear">Clear training points</button>
+  <div class="legend">
+    <span class="dot" style="background:red"></span> A
+    <span style="width:16px"></span>
+    <span class="dot" style="background:blue"></span> B
+  </div>
+  <div style="margin-left:12px; color:#666">Left-click = classify point • Right-click = add training point</div>
+</div>
+
+<canvas id="canvas" width="700" height="480"></canvas>
+<div id="info"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let trainData = [
+  { x: 70, y: 120, label: 'A' },
+  { x: 110, y: 160, label: 'A' },
+  { x: 140, y: 90, label: 'A' },
+  { x: 480, y: 320, label: 'B' },
+  { x: 540, y: 360, label: 'B' },
+  { x: 420, y: 300, label: 'B' }
+];
+
+let testPoint = null;
+let currentClass = 'A';
+const kInput = document.getElementById('kInput');
+const infoEl = document.getElementById('info');
+
+// utils
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+function knn(train, test, k){
+  if(!train.length) return { predicted: null, nearest: [] };
+  const arr = train.map((p, idx) => ({ ...p, idx, d: dist(p, test) }))
+                   .sort((a,b)=>a.d - b.d);
+  const nearest = arr.slice(0, Math.min(k, arr.length));
+  const votes = {};
+  for (const n of nearest) votes[n.label] = (votes[n.label]||0) + 1;
+  const maxVotes = Math.max(...Object.values(votes));
+  const tied = Object.keys(votes).filter(l => votes[l] === maxVotes);
+  let predicted;
+  if (tied.length === 1) predicted = tied[0];
+  else {
+    // tie-breaker: choose label of nearest neighbor among nearest
+    predicted = nearest[0].label;
+  }
+  return { predicted, nearest };
+}
+
+function draw(){
+  ctx.clearRect(0,0,canvas.width, canvas.height);
+
+  // draw grid
+  ctx.save();
+  ctx.lineWidth = 0.5; ctx.strokeStyle = '#eee';
+  for(let x=0;x<=canvas.width;x+=50){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); ctx.stroke(); }
+  for(let y=0;y<=canvas.height;y+=50){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); ctx.stroke(); }
+  ctx.restore();
+
+  // If test point exists, compute neighbors
+  const k = Math.max(1, Math.min(15, parseInt(kInput.value || '3')));
+  let nearest = [];
+  let predicted = null;
+  if (testPoint) {
+    const result = knn(trainData, testPoint, k);
+    predicted = result.predicted;
+    nearest = result.nearest;
+  }
+
+  // Draw training points
+  for (let i=0;i<trainData.length;i++){
+    const p = trainData[i];
+    ctx.beginPath();
+    ctx.fillStyle = p.label === 'A' ? 'red' : 'blue';
+    ctx.arc(p.x, p.y, 6, 0, Math.PI*2);
+    ctx.fill();
+    // label index small
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.font = '10px monospace';
+    ctx.fillText(i, p.x-4, p.y+3);
+  }
+
+  // highlight neighbors
+  for(const n of nearest){
+    ctx.beginPath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+    ctx.setLineDash([6,4]);
+    ctx.moveTo(testPoint.x, testPoint.y);
+    ctx.lineTo(n.x, n.y);
+    ctx.stroke();
+
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'gold';
+    ctx.arc(n.x, n.y, 10, 0, Math.PI*2);
+    ctx.stroke();
+  }
+
+  // draw test point
+  if (testPoint){
+    ctx.beginPath();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#000';
+    ctx.fillStyle = predicted === 'A' ? 'rgba(255,0,0,0.6)' : 'rgba(0,0,255,0.6)';
+    ctx.arc(testPoint.x, testPoint.y, 9, 0, Math.PI*2);
+    ctx.fill();
+    ctx.stroke();
+  }
+
+  // draw legend / status in canvas corner
+  ctx.fillStyle = '#222';
+  ctx.font = '13px sans-serif';
+  ctx.fillText(`Train: ${trainData.length} pts • k=${k}`, 10, 18);
+
+  // update info panel
+  if (!testPoint) {
+    infoEl.textContent = 'Left-click anywhere to classify a point.\nRight-click to add a training point of current class.\n\nNo test point yet.';
+  } else {
+    let s = `Test: (${Math.round(testPoint.x)}, ${Math.round(testPoint.y)})\nPredicted class: ${predicted ?? '—'}\n\nNeighbors (closest ${nearest.length}):\n`;
+    nearest.forEach((n, idx) => {
+      s += `${idx+1}. idx=${n.idx} label=${n.label} dist=${n.d.toFixed(1)}\n`;
+    });
+    infoEl.textContent = s;
+  }
+}
+
+// events
+canvas.addEventListener('click', (e) => {
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  testPoint = { x, y };
+  draw();
+});
+
+canvas.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+  // add training point of current class
+  trainData.push({ x, y, label: currentClass });
+  // set it as test point too so user sees immediate effect
+  testPoint = { x, y };
+  draw();
+});
+
+document.getElementById('toggleClass').addEventListener('click', () => {
+  currentClass = currentClass === 'A' ? 'B' : 'A';
+  document.getElementById('toggleClass').textContent = `Current class: ${currentClass}`;
+});
+
+document.getElementById('addRandom').addEventListener('click', () => {
+  for(let i=0;i<8;i++){
+    const x = 30 + Math.random()*(canvas.width-60);
+    const y = 30 + Math.random()*(canvas.height-60);
+    const label = Math.random() > 0.5 ? 'A' : 'B';
+    trainData.push({ x, y, label });
+  }
+  draw();
+});
+
+document.getElementById('clear').addEventListener('click', () => {
+  trainData = [];
+  testPoint = null;
+  draw();
+});
+
+kInput.addEventListener('input', () => {
+  if (testPoint) draw();
+});
+
+// initial draw
+draw();
+</script>
+</body>
+</html>
